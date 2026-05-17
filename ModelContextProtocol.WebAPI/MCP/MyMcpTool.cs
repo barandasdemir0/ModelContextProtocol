@@ -14,4 +14,15 @@ public static class MyMcpTool
         var res = weatherServices.Get(city);
         return res;
     }
+
+    [McpServerTool, Description("Personellerin tarih bazlı satış listesini döndürür")]
+    public static List<Sale> GetSales()
+    {
+        return SaleServices.Sales;
+    }
+    [McpServerTool, Description("Yapılacak Ödemelerin Son tarihlerini ve firma bilgilerini döndürür")]
+    public static List<Payment> GetPayments()
+    {
+        return PaymentServices.Payments;
+    }
 }
