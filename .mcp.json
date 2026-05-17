@@ -1,0 +1,7 @@
+{
+  "servers": {
+    "my-tool": {
+      "url": "https://mcp.barandasdemir.com/mcp"
+    }
+  }
+}
