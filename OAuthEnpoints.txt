@@ -1,0 +1,160 @@
+// ✅ OAuth Authorization Server Metadata (RFC 8414)
+app.MapGet("/.well-known/oauth-authorization-server", () => Results.Json(new
+{
+    issuer = serverUrl,
+    authorization_endpoint = $"{serverUrl}/oauth/authorize",
+    token_endpoint = $"{serverUrl}/oauth/token",
+    registration_endpoint = $"{serverUrl}/oauth/register",
+    response_types_supported = new[] { "code" },
+    grant_types_supported = new[] { "authorization_code", "refresh_token" },
+    code_challenge_methods_supported = new[] { "S256" }, // PKCE
+    scopes_supported = new[] { "mcp:tools" },
+    token_endpoint_auth_methods_supported = new[] { "none" } // public client
+}));
+
+var registeredClients = new Dictionary<string, string>(); // clientId -> clientName
+
+app.MapPost("/oauth/register", async (HttpContext context) =>
+{
+    var body = await context.Request.ReadFromJsonAsync<JsonElement>();
+
+    var clientId = Guid.NewGuid().ToString("N");
+    var clientName = body.TryGetProperty("client_name", out var name)
+        ? name.GetString() ?? "unknown"
+        : "unknown";
+
+    registeredClients[clientId] = clientName;
+
+    return Results.Json(new
+    {
+        client_id = clientId,
+        client_name = clientName,
+        redirect_uris = body.TryGetProperty("redirect_uris", out var uris)
+            ? uris : default,
+        grant_types = new[] { "authorization_code", "refresh_token" },
+        response_types = new[] { "code" },
+        token_endpoint_auth_method = "none"
+    }, statusCode: 201);
+});
+
+app.MapGet("/oauth/authorize", (
+    string response_type,
+    string client_id,
+    string redirect_uri,
+    string code_challenge,
+    string code_challenge_method,
+    string? state,
+    string? scope) =>
+{
+    // Login formunu göster
+    var html = $"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Login</title></head>
+        <body>
+            <h2>MCP Server Login</h2>
+            <form method="post" action="/oauth/login">
+                <input type="hidden" name="redirect_uri" value="{redirect_uri}" />
+                <input type="hidden" name="code_challenge" value="{code_challenge}" />
+                <input type="hidden" name="state" value="{state}" />
+                <label>Username: <input type="text" name="username" /></label><br/>
+                <label>Password: <input type="password" name="password" /></label><br/>
+                <button type="submit">Login</button>
+            </form>
+        </body>
+        </html>
+        """;
+
+    return Results.Content(html, "text/html");
+});
+
+var authCodes = new Dictionary<string, AuthCodeData>();
+
+app.MapPost("/oauth/login", async (HttpContext context) =>
+{
+    var form = await context.Request.ReadFormAsync();
+    var username = form["username"].ToString();
+    var password = form["password"].ToString();
+    var redirectUri = form["redirect_uri"].ToString();
+    var codeChallenge = form["code_challenge"].ToString();
+    var state = form["state"].ToString();
+
+    // ✅ Kullanıcıyı mevcut sisteminizde doğrulayın
+    //var isValid = await ValidateUser(username, password); // kendi metodunuz
+    //if (!isValid)
+    //{
+    //    return Results.Content("<h2>Invalid credentials</h2>", "text/html");
+    //}
+
+    // Authorization code üret
+    var code = Guid.NewGuid().ToString("N");
+    authCodes[code] = new AuthCodeData(username, codeChallenge, DateTime.UtcNow.AddMinutes(5));
+
+    // Client'a geri yönlendir
+    var redirectUrl = $"{redirectUri}?code={code}";
+    if (!string.IsNullOrEmpty(state))
+        redirectUrl += $"&state={state}";
+
+    return Results.Redirect(redirectUrl);
+});
+
+app.MapPost("/oauth/token", async (HttpContext context) =>
+{
+    var form = await context.Request.ReadFormAsync();
+    var grantType = form["grant_type"].ToString();
+    var code = form["code"].ToString();
+    var codeVerifier = form["code_verifier"].ToString();
+    var refreshToken = form["refresh_token"].ToString();
+
+    if (grantType == "authorization_code")
+    {
+        // Code'u doğrula
+        if (!authCodes.TryGetValue(code, out var codeData))
+            return Results.Json(new { error = "invalid_grant" }, statusCode: 400);
+
+        if (codeData.ExpiresAt < DateTime.UtcNow)
+        {
+            authCodes.Remove(code);
+            return Results.Json(new { error = "invalid_grant" }, statusCode: 400);
+        }
+
+        // PKCE doğrula
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(codeVerifier));
+        var computedChallenge = Base64UrlEncode(hash);
+
+        if (computedChallenge != codeData.CodeChallenge)
+            return Results.Json(new { error = "invalid_grant" }, statusCode: 400);
+
+        authCodes.Remove(code); // Single use
+
+        // JWT üret
+        var (accessToken, newRefreshToken) = GenerateTokens(codeData.Username);
+
+        return Results.Json(new
+        {
+            access_token = accessToken,
+            refresh_token = newRefreshToken,
+            token_type = "Bearer",
+            expires_in = 3600
+        });
+    }
+
+    if (grantType == "refresh_token")
+    {
+        var username = "test";//ValidateRefreshToken(refreshToken);
+        if (username == null)
+            return Results.Json(new { error = "invalid_grant" }, statusCode: 400);
+
+        var (accessToken, newRefreshToken) = GenerateTokens(username);
+        return Results.Json(new
+        {
+            access_token = accessToken,
+            refresh_token = newRefreshToken,
+            token_type = "Bearer",
+            expires_in = 3600
+        });
+    }
+
+    return Results.Json(new { error = "unsupported_grant_type" }, statusCode: 400);
+});

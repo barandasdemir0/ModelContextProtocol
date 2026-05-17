@@ -1,0 +1,34 @@
+var serverUrl = "http://localhost:5000";
+var jwtSecret = "My secret key My secret key My secret key My secret key My secret key My secret key My secret key My secret key My secret key My secret key My secret key My secret key My secret key My secret key";
+var jwtIssuer = serverUrl;   // "Issuer" yerine serverUrl
+var jwtAudience = serverUrl; // "Audience" yerine serverUrl
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultChallengeScheme = McpAuthenticationDefaults.AuthenticationScheme;
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+}).AddJwtBearer(opt =>
+{
+    opt.TokenValidationParameters.ValidateIssuer = true;
+    opt.TokenValidationParameters.ValidateAudience = true;
+    opt.TokenValidationParameters.ValidateIssuerSigningKey = true;
+    opt.TokenValidationParameters.ValidateLifetime = true;
+    opt.TokenValidationParameters.ValidIssuer = jwtIssuer;
+    opt.TokenValidationParameters.ValidAudience = jwtAudience;
+    opt.TokenValidationParameters.IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
+})
+.AddMcp(options =>
+{
+    options.ResourceMetadata = new()
+    {
+       Resource = serverUrl,
+       // Auth server'ınızın OAuth 2.0 metadata endpoint'i olmalı
+       // GET /.well-known/oauth-authorization-server döndürmeli
+       AuthorizationServers = { serverUrl },
+       ScopesSupported = ["mcp:tools"]
+    };
+});
+builder.Services.AddAuthorization();
+
+builder.Services.AddHttpContextAccessor();
+

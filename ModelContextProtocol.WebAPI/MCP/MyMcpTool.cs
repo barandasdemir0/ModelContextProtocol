@@ -9,7 +9,7 @@ namespace ModelContextProtocol.WebAPI.MCP;
 public static class MyMcpTool
 {
     [McpServerTool,Description("Verilen şehir bilgiisne göre o şehrin sıcaklığını döndürür")]
-    public static Weather GetWeather([Description("Şehir bilgisi")]  string city, WeatherServices weatherServices)
+    public static Weather GetWeather([Description("Şehir bilgisi")]  string city, WeatherServices weatherServices,IHttpContextAccessor httpContextAccessor)
     {
         var res = weatherServices.Get(city);
         return res;
